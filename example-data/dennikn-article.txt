@@ -1,0 +1,41 @@
+Hoci Matovič chcel nové kritérium, vrátili sme sa ku kĺzavému mediánu. Prečo to nie je dobrý nápad
+
+Vraciame sa ku kĺzavému mediánu. Teraz je na hodnote 1037.
+
+Premiér Igor Matovič na tlačovej konferencii po zasadnutí krízového štábu oznámil, že opatrenia skončia, keď sedemdňový kĺzavý medián denných prírastkov pozitívne testovaných klesne pod 500.
+
+Kĺzavý medián si verejnosť pamätá z prvej vlny. Aj vtedy od neho záviselo uvoľňovanie či sprísňovanie opatrení. Neskôr od neho úrady ustúpili. Dnes sa k nemu znovu vraciame, a to s inými rozhodujúcimi hodnotami.
+
+Problémom je, že kĺzavý medián už nedáva až taký zmysel. Dôvody môžeme rozdeliť do dvoch skupín: matematické a praktické.
+
+Bežne sa v živote riadime priemermi, lenže priemer nie je vždy vhodný ukazovateľ. Preto existujú alternatívne ukazovatele, ktoré nazývame ako medián a modus. Priemer priemeruje a medián vyberá hodnotu, ktorá delí súbor čísel na dve polovice.
+
+[ Aktivujte si zasielanie Newsfiltra každý večer do 20:00 na e-mail. Odber si aktivujte jedným kliknutím. ]
+Medián je preto vhodný pre taký súbor hodnôt, v ktorom sa vyskytujú extrémne hodnoty len na jednej strane. Napríklad malé množstvo extrémne vysokých hodnôt. Preto sa často hovorí, že ak sa bavíme o mzdách Slovákov, mali by sme sa baviť o mediánovej mzde, nie priemernej.
+
+
+Prečítajte si
+Dnešný medián je 32. Ak štyri dni po sebe pribudne 150 a viac prípadov, znova zatvárame
+Príklad: ak drvivá väčšina ľudí zarába 500 eur a málé množstvo ľudí zarába desaťtisíce eur, tak priemerná mzda bude ovplyvnená tými extrémne vysokými mzdami. Priemer v takom prípade nie je vhodným ukazovateľom o mzdách, lebo by bol ďaleko od toho, čo zarába drvivá väčšina. Mediánová mzda by však bola 500 eur. Samozrejme, v praxi je výpočet priemernej mzdy komplexnejší a extrémne vysoké mzdy sa z výpočtu vylučujú.
+
+V prvej vlne sa mohlo stávať, že pri bežnom testovaní sa odhalilo len málo prípadov a potom pri cielenom testovaní nejakého ohniska sa nárazovo objavilo extrémne vysoké číslo. Napríklad 0, 5, 3, 5, 3, 0 a zrazu 100. V takom prípade by bol priemer 16,6 a medián 3.
+
+Lenže v druhej vlne testujeme tak veľa a máme tak veľa pozitívnych prípadov, že nie je dôvod, prečo by sme mali očakávať extrémne vychyľujúce sa denné prírastky od bežných prírastkov. Ak sa aj po víkende objavia vyššie čísla, sú kompenzované nižšími číslami počas víkendu. Bez výčitiek môžeme počítať priemer.
+
+Ďalší matematický nedostatok je ten, že ho počítame len za sedem dní. Sedem hodnôt je na počítanie kĺzavého mediánu málo. Preto sa mení skokovito, nie plynule a o tom, akú bude mať kĺzavý medián hodnotu, nerozhodujú len čísla samotné, ale aj to, či sa nízkym alebo vysokým hodnotám podarí vyskytnúť sa štyrikrát v súbore siedmich čísel.
+
+
+
+Ak by sme z nejakého dôvodu mali v párne dni 499 nových prípadov a v nepárne dni 10-tisíc nových prípadov, tak by sa kĺzavý medián skokovito menil každý deň. Jeden deň by bol 499 a druhý 10-tisíc. Jeden deň by sme uvoľňovali a druhý deň by sme rýchlo zatvárali a desili sa z vysokého mediánu. V realite by sa však nič nemenilo. V súbore siedmich čísel by sa dialo len to, že každý deň by sa striedala hodnota, ktorá sa tam vyskytuje štyrikrát.
+
+Ak sa na to pozeráme z matematického hľadiska, v tejto situácii by bol vhodnejší kĺzavý priemer. Aj preto, že by bol zrozumiteľný pre širokú verejnosť.
+
+Teraz tie praktické dôvody. Nie je úplne zrejmé, čoho ukazovateľom sú denné prírastky. Čo vlastne merajú a prečo by mal byť medián počítaný práve z denných prírastkov. To, koľko za deň pribudne nových pozitívnych, nezávisí totiž len od samotnej epidémie, ale napríklad aj od kapacity testovania. Aj v tieto dni, keď pozitivita testovania prekročila 10 percent a ďalej rastie, sú denné prírastky pozitívne testovaných každým dňom vzdialenejšie od reality.
+
+Už počas prvej vlny sa hovorilo, že by rozhodujúcim ukazovateľom mohli byť iné premenné, napríklad obsadenosť nemocníc.
+
+Ešte koncom septembra pritom aj sám premiér na tlačovej konferencii povedal, že by sa malo zadefinovať presnejšie kritérium. Minister Krajčí mu mal povedať, že nie všetko je kĺzavý medián. „Ten ukazuje obraz, kto sa nakazil pred dvomi týždňami, ale omnoho dôležitejšie je, koľko ľudí vám skončí v nemocniciach, koľko ľudí zomiera a koľko je na pľúcnych ventiláciách,“ povedal koncom septembra Matovič.
+
+Preto podľa premiéra potrebujú nastaviť iný, komplikovanejší parameter. „Očakávam od pána ministra, že príde s takouto odpoveďou, že to nebude môcť byť len o kĺzavom mediáne, ale že to bude kombinácia troch parametrov – kĺzavý medián, počet pacientov v nemocniciach a počet pacientov na pľúcnej ventilácii,“ hovoril Matovič pred dvomi týždňami.
+
+Výsledný parameter mal byť kombináciou týchto údajov. Termín, dokedy mal minister takýto parameter definovať, premiér nedal.
