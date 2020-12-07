@@ -173,7 +173,7 @@ def timeit(method):
 
 # this is the requested function by Anchors!
 
-@timeit
+#@timeit
 def predict_text(text):
     return model.predict(vectorizer.transform(text))
 
