@@ -1,0 +1,156 @@
+from sumy.parsers.plaintext import PlaintextParser
+from sumy.nlp.tokenizers import Tokenizer
+from sumy.nlp.stemmers import Stemmer
+from sumy.utils import get_stop_words
+from sumy.summarizers.text_rank import TextRankSummarizer
+from lime import lime_text
+from tme.src.helper import summary_to_string
+import ray
+
+
+@ray.remote
+class TextModelsExplainer:
+
+    def __init__(
+            self,
+            modelfn,
+            classnames,
+            language="english",
+            explainer=None,
+            summarizer=None,
+            fm=5,
+            topfeaturescount=100,
+            sentencescount=6,
+            logger=None
+    ):
+        self.fm = fm
+        self.modelfn = modelfn
+        self.classnames = classnames
+        self.topfeaturescount = topfeaturescount
+        self.language = language
+        self.sentencescount = sentencescount
+
+        if explainer is not None:
+            self.explainer = explainer
+        else:
+            self.explainer = lime_text.LimeTextExplainer(class_names=self.classnames)
+
+        if summarizer is not None:
+            self.summarizer = summarizer
+        else:
+            self.summarizer = TextRankSummarizer(Stemmer(self.language))
+            self.summarizer.stop_words = get_stop_words(self.language)
+
+        if logger is not None:
+            self.log = logger
+
+    def explanation_summaries(self, instances, fm=None):
+        """
+        Creates explanation summaries for all elements in instances
+        :param instances: list of instances (1 instace = 1 string) or map of instanceId:instace
+        :param fm: factor multiplier to use when boosting specific sentences in summary
+        :return: list or map of summaries (based on input type of instances)
+        """
+
+        if fm is not None:
+            self.fm = fm
+            self._logi(f'Factor Multiplier changed to {self.fm}')
+
+        if type(instances) == dict:
+            summaries = {}
+
+            for instance in instances:
+                summaries[instance] = self._summarize_doc_custom(instances[instance])
+
+            return summaries
+
+        elif type(instances) == list:
+            summaries = []
+
+            for instance in instances:
+                summaries.append(self._summarize_doc_custom(instance))
+
+            return summaries
+        else:
+            raise ValueError("Unknown data input type for instances in create_e_summaries")
+
+    def simple_summaries(self, instances):
+        """
+        Creates TextRank summaries for all instances
+        :param instances: list of instances or map of type instanceID:instance
+        :return: list or map of summaries (based on input type of instances)
+        """
+
+        if type(instances) == dict:
+            summaries = {}
+
+            for instance in instances:
+                summaries[instance] = self._summarize_doc_simple(instances[instance])
+
+            return summaries
+
+        elif type(instances) == list:
+            summaries = []
+
+            for instance in instances:
+                summaries.append(self._summarize_doc_simple(instance))
+
+            return summaries
+
+    def _summarize_doc_simple(self, instance):
+        """
+        Creates TextRank summary from instance
+        :param instance:
+        :return:
+        """
+        parser = PlaintextParser.from_string(instance, Tokenizer(self.language))
+        return summary_to_string(self.summarizer(parser.document, self.sentencescount))
+
+    def _summarize_doc_custom(self, instance):
+        """
+        Creates summary with altered weights based on explanation
+        :param instance: text of instance
+        :return: tupple of (summary, explanation words list)
+        """
+
+        parser = PlaintextParser.from_string(instance, Tokenizer(self.language))
+
+        # generates graph with weights
+        graph = self.summarizer.rate_sentences(parser.document)
+
+        # generate explanation
+        explanation = self.explainer.explain_instance(
+            instance,
+            self.modelfn,
+            num_features=self.topfeaturescount
+        )
+
+        # iterate over each sentence in textrank graph
+        for sentence in graph.keys():
+            factor = self.__compute_factor(sentence, explanation.as_list())
+            graph[sentence] = graph[sentence] * factor
+
+        # noinspection PyProtectedMember
+        resulting_summary = self.summarizer._get_best_sentences(parser.document.sentences, self.sentencescount, graph)
+
+        return summary_to_string(resulting_summary), explanation.as_list()
+
+    def _logw(self, msg):
+        if self.log is not None:
+            self.log.warning(msg)
+
+    def _logi(self, msg):
+        if self.log is not None:
+            self.log.info(msg)
+
+            def _logi(self, msg):
+                if self.log is not None:
+                    self.log.info(msg)
+
+    def __compute_factor(self, sentence, explanation_words_weight):
+        factor = 1.0
+        exp_map = dict(explanation_words_weight)
+        for word in sentence.words:  # for each word in sentence
+            if word in exp_map:  # check if word is in important words list from LIME
+                factor += self.fm * abs(exp_map[word])
+        return factor
