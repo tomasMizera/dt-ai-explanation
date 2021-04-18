@@ -1,3 +1,5 @@
+import logging
+
 from sumy.parsers.plaintext import PlaintextParser
 from sumy.nlp.tokenizers import Tokenizer
 from sumy.nlp.stemmers import Stemmer
@@ -5,10 +7,8 @@ from sumy.utils import get_stop_words
 from sumy.summarizers.text_rank import TextRankSummarizer
 from lime import lime_text
 from tme.src.helper import summary_to_string
-import ray
 
 
-@ray.remote
 class TextModelsExplainer:
 
     def __init__(
@@ -43,6 +43,8 @@ class TextModelsExplainer:
 
         if logger is not None:
             self.log = logger
+        else:
+            self.log = logging.getLogger()
 
     def explanation_summaries(self, instances, fm=None):
         """
@@ -143,9 +145,9 @@ class TextModelsExplainer:
         if self.log is not None:
             self.log.info(msg)
 
-            def _logi(self, msg):
-                if self.log is not None:
-                    self.log.info(msg)
+    def _logd(self, msg):
+        if self.log is not None:
+            self.log.debug(msg)
 
     def __compute_factor(self, sentence, explanation_words_weight):
         factor = 1.0

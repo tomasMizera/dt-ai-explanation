@@ -33,14 +33,14 @@ def run_worker(j):
         log.warning.remote("informative log")
 
 
-def run():
-    ray.init()
+def run(redis_password):
+    ray.init(address='auto', _redis_password=redis_password)
     print('''This cluster consists of
         {} nodes in total
         {} CPU resources in total
     '''.format(len(ray.nodes()), ray.cluster_resources()['CPU']))
     lo = L.remote(1000)
     lo.warning.remote("Starting!")
-    ray.get([run_worker.remote(i) for i in range(9)])
+    ray.get([run_worker.remote(i) for i in range(20)])
     # ray.get()
     lo.warning.remote("print from outside worker")

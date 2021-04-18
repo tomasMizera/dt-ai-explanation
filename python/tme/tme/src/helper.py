@@ -1,5 +1,8 @@
-
 def summary_to_string(summary):
+    """
+    Converts summary from sumy type (list of Sentences) to one string
+    """
+
     if len(summary) <= 0:
         return ""
 
