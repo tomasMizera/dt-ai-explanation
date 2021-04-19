@@ -18,10 +18,13 @@ def initialize_task(data, modelpath, fm_it, cnames, workerid):
     """
 
     print(f'Worker id #{workerid} started operating')
+    start = time.time()
 
     # read model with filelock
     with FileLock(os.path.join(os.path.expanduser(modelpath), "iolock.lock")):
         model = eh.load_lstm_model(os.path.expanduser(modelpath))
+
+    print(f'Worker id #{workerid} t1: {time.time() - start}')
 
     def _predict_proba_fn(_input):
         """
@@ -29,26 +32,41 @@ def initialize_task(data, modelpath, fm_it, cnames, workerid):
         _input - 1d array of instances
         Returns 2d array of [num of instances] x [num of classes] with probabilities
         """
+        strt = time.time()
         prediction = model.predict(_input)
-        return np.append(prediction, 1 - prediction, axis=1)
+        print(f'Worker inside prediction, prediction took: {time.time() - strt}')
+        outarr = np.append(prediction, 1 - prediction, axis=1)
+        print(f'Worker inside prediction, merging took: {time.time() - strt}')
 
-    tmexplainer = tme.TextModelsExplainer(classnames=cnames, modelfn=_predict_proba_fn)
+        return outarr
+
+    tmexplainer = tme.TextModelsExplainer(classnames=cnames, modelfn=_predict_proba_fn, uuid=workerid)
+
+    print(f'Worker id #{workerid} t2: {time.time() - start}')
 
     data_x, data_y = data  # unpack data (instances, labels)
+
+    print(f'Worker id #{workerid} t3: {time.time() - start}')
 
     print(f'Worker id #{workerid} processing fm: {fm_it}')
 
     # create summaries - both
     csummary = tmexplainer.explanation_summaries(data_x, fm=fm_it)
+    print(f'Worker id #{workerid} t4: {time.time() - start}')
     ssummary = tmexplainer.simple_summaries(data_x)
+    print(f'Worker id #{workerid} t5: {time.time() - start}')
     print(f'Worker id #{workerid} finished creating summaries for fm: {fm_it}')
 
     csummary_texts = list(map(lambda x: x[0], csummary))
     ssummary_texts = list(ssummary)
 
+    print(f'Worker id #{workerid} t6: {time.time() - start}')
     mcsummaries = model.predict(csummary_texts)
+    print(f'Worker id #{workerid} t7: {time.time() - start}')
     mssummaries = model.predict(ssummary_texts)
+    print(f'Worker id #{workerid} t8: {time.time() - start}')
     modelp = model.predict(data_x)
+    print(f'Worker id #{workerid} t9: {time.time() - start}')
 
     assert (all([len(modelp) == len(ssummary),
                  len(ssummary) == len(csummary),
@@ -61,6 +79,7 @@ def initialize_task(data, modelpath, fm_it, cnames, workerid):
     modelp = np.append(modelp, mcsummaries, axis=1)
     modelp = np.append(modelp, mssummaries, axis=1)
     modelp = np.append(modelp, labels, axis=1)
+    print(f'Worker id #{workerid} t10: {time.time() - start}')
 
     out = StringIO()
     np.savetxt(
@@ -72,6 +91,7 @@ def initialize_task(data, modelpath, fm_it, cnames, workerid):
         delimiter=','
     )
     print(f'Worker id #{workerid} finished processing multiplier {fm_it}')
+    print(f'Worker id #{workerid} tend: {time.time() - start}')
 
     return out.getvalue()
 
@@ -106,7 +126,7 @@ class FindFactorExperiment:
         self.log = logging.getLogger()
 
     def prepare_data(self, batchsize, minnumofsentences):
-        data = eh.load_imdb_dataset('train[:100]')
+        data = eh.load_imdb_dataset('train+test')
         data = eh.preprocess_dataset(data, minnumofsentences)
         datagen = eh.generate_batches_of_size(data, batchsize)
         datachunk = ''
@@ -124,7 +144,7 @@ class FindFactorExperiment:
         self._logw(f'Starting experiment - {self.experimenttag} ------------------------')
 
         start = time.time()
-        ray.init()
+        ray.init(address='auto', _redis_password='5241590000000000')
 
         datachunk = self.prepare_data(batch_size, from_sentences_count)
         if datachunk == 1:

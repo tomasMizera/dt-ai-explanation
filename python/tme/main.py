@@ -21,7 +21,10 @@ if __name__ == '__main__':
             experiments.ray_experiment.run(redis_password='5241590000000000')
         elif args.experiment == 'fp':
             experiments.find_factor.FindFactorExperiment(args.experimenttag).run(
-                batch_size=5,
-                to_factor=10,
-                from_sentences_count=10
+                batch_size=10,
+                to_factor=7,
+                from_sentences_count=40
             )
+        elif args.experiment == 'limebench':
+            experiments.lime_benchmark.run()
+

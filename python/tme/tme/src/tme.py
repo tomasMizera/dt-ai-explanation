@@ -21,7 +21,8 @@ class TextModelsExplainer:
             fm=5,
             topfeaturescount=100,
             sentencescount=6,
-            logger=None
+            logger=None,
+            uuid=""
     ):
         self.fm = fm
         self.modelfn = modelfn
@@ -29,6 +30,7 @@ class TextModelsExplainer:
         self.topfeaturescount = topfeaturescount
         self.language = language
         self.sentencescount = sentencescount
+        self.uuid = uuid
 
         if explainer is not None:
             self.explainer = explainer
@@ -114,27 +116,31 @@ class TextModelsExplainer:
         :param instance: text of instance
         :return: tupple of (summary, explanation words list)
         """
-
+        import time
+        start = time.time()
+        print(f'Worker id #{self.uuid} tstart tme: {time.time() - start}')
         parser = PlaintextParser.from_string(instance, Tokenizer(self.language))
-
         # generates graph with weights
+        print(f'Worker id #{self.uuid} t1 tme: {time.time() - start}')
         graph = self.summarizer.rate_sentences(parser.document)
-
+        print(f'Worker id #{self.uuid} t2 tme: {time.time() - start}')
         # generate explanation
         explanation = self.explainer.explain_instance(
             instance,
             self.modelfn,
-            num_features=self.topfeaturescount
+            num_features=self.topfeaturescount,
+            num_samples=5000
         )
+        print(f'Worker id #{self.uuid} t3 tme: {time.time() - start}')
 
         # iterate over each sentence in textrank graph
         for sentence in graph.keys():
             factor = self.__compute_factor(sentence, explanation.as_list())
             graph[sentence] = graph[sentence] * factor
-
+        print(f'Worker id #{self.uuid} t4 tme: {time.time() - start}')
         # noinspection PyProtectedMember
         resulting_summary = self.summarizer._get_best_sentences(parser.document.sentences, self.sentencescount, graph)
-
+        print(f'Worker id #{self.uuid} t5 tme: {time.time() - start}')
         return summary_to_string(resulting_summary), explanation.as_list()
 
     def _logw(self, msg):
