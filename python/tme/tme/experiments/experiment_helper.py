@@ -16,6 +16,7 @@ def preprocess_dataset(dataset, max_sentences_count):
     Counts num of sentences in each instance and filters out those that have less than `max_sentences_count` sentences
     """
 
+    @tf.function
     def _proc(x, y):
         return x, len(tf.strings.split(x, sep='.')), y
 
@@ -84,3 +85,11 @@ def generate_sequence(maxn):
         i = i + (1 + int(i / 10))
 
     return seq
+
+
+# https://www.codegrepper.com/code-examples/python/python+split+dict+into+chunks
+def dict_to_chunks(d, outdlen=100):
+    from itertools import islice
+    it = iter(d)
+    for i in range(0, len(d), outdlen):
+        yield {k: d[k] for k in islice(it, outdlen)}
