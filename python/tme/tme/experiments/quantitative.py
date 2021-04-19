@@ -200,7 +200,7 @@ class QuantitativeExperiment:
         except NameError:
             pass
 
-        progress = 0.25
+        progress = 1
         precomputed_data = ([], [], [])  # text, label, explanation
         while precomputing_worker_ids:
             done_ids, precomputing_worker_ids = ray.wait(precomputing_worker_ids)
@@ -208,23 +208,28 @@ class QuantitativeExperiment:
             del done_ids
 
             for instanceid, explanation in res.items():
-                print(f"Saving precomputed id: {instanceid}")
                 precomputed_data[0].append(datachunk[instanceid][0])  # instance text
                 precomputed_data[1].append(datachunk[instanceid][1])  # instance label
                 precomputed_data[2].append(explanation)  # instance explanation
+                del datachunk[instanceid]
 
-            if (len(precomputed_data[0]) / batch_size) > progress:
-                self._logi(f'Precomputed {progress*100}% of data')
-                progress += 0.25
+            if (len(precomputed_data[0]) / batch_size) > 0.1:
+                self._logi(f'Saving chunk #{progress} of data')
 
-        assert len(datachunk) == len(precomputed_data[0])
+                with open(os.path.join(self.basepath, f"precomputed_{progress}.pickle"), "wb") as f:
+                    pickle.dump(precomputed_data, f)
+                
+                precomputed_data = ([], [], [])
+                progress += 1
+
+        # assert len(datachunk) == len(precomputed_data[0])  # not true anymore
         assert len(precomputed_data[0]) == len(precomputed_data[1]) == len(precomputed_data[2])
         del datachunk
 
         self._logi(f'Precomputed explanations for {self.experimenttag}, took: {time.time() - start}')
 
         # save precomputated data
-        with open(os.path.join(self.basepath, "precomputed.pickle"), 'wb') as f:
+        with open(os.path.join(self.basepath, f"precomputed_{progress}.pickle"), 'wb') as f:
             pickle.dump(precomputed_data, f)
             self._logi(f'Precomputed data saved to {self.basepath}')
 
@@ -239,7 +244,7 @@ class QuantitativeExperiment:
         if run_to_factor:
             seq = eh.generate_sequence(factor)
 
-        for factormultiplier in seq:
+        for factormultiplier in []:  # !! replace with seq
             task_id = initialize_task.remote(
                 datachunkid,  # id of tuple (list of instances ~ strings, list of labels ~ ints)
                 factormultiplier,
