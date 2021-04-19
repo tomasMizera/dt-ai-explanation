@@ -33,8 +33,8 @@ def run_worker(j):
         log.warning.remote("informative log")
 
 
-def run(redis_password):
-    ray.init(address='auto', _redis_password=redis_password)
+def run():
+    ray.init(address='auto', _redis_password="")
     print('''This cluster consists of
         {} nodes in total
         {} CPU resources in total

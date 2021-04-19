@@ -3,6 +3,7 @@ from lime import lime_text
 from io import StringIO
 import numpy as np
 import logging
+import pickle
 import time
 import ray
 import sys
@@ -100,7 +101,7 @@ def precompute_explanations(data, cnames, modelpath, workerid):
     return outdict
 
 
-class FindFactorExperiment:
+class QuantitativeExperiment:
 
     def __init__(self, experiment_tag):
         self.experimenttag = experiment_tag
@@ -113,6 +114,8 @@ class FindFactorExperiment:
         self.logpath = os.path.join(self.basepath, 'log')
         self.outpath = os.path.join(self.basepath, 'csv')
 
+        logfilepath = os.path.join(self.logpath, f'{self.experimenttag}-{now}.log')
+
         # prepare output folder
         try:
             os.makedirs(self.basepath, exist_ok=True)
@@ -120,15 +123,18 @@ class FindFactorExperiment:
             os.makedirs(self.outpath, exist_ok=True)
 
             latestpath = os.path.join(self.experimentpath, 'latest')
+            latestlogpath = os.path.join(self.logpath, 'latest.log')
             if os.path.islink(latestpath):
                 os.remove(latestpath)
+            if os.path.islink(latestlogpath):
+                os.remove(latestlogpath)
             os.symlink(self.basepath, latestpath, target_is_directory=True)
+            os.symlink(logfilepath, latestlogpath)
         except FileExistsError as e:
             self._logw(e)
             sys.exit(1)
 
         # setup logger
-        logfilepath = os.path.join(self.logpath, f'{self.experimenttag}-{now}.log')
         logging.basicConfig(
             level=logging.DEBUG,
             format='[%(asctime)s] %(levelname)s - %(message)s',
@@ -161,8 +167,12 @@ class FindFactorExperiment:
         self._logi(f'Data prepared for experiment {self.experimenttag}')
         return datadict
 
-    def run(self, batch_size=100, to_factor=100, from_sentences_count=10):
+    def run(self, batch_size=100, factor=100, from_sentences_count=10, run_to_factor=False):
         self._logw(f'Starting experiment - {self.experimenttag} ------------------------')
+        self._logi(f'Experiment setup:\n- {"QUANTITATIVE" if not run_to_factor else "FINDING MAX"}\n'
+                   f'- factor / to factor: {factor}\n'
+                   f'- min sentences count: {from_sentences_count}\n'
+                   f'- batch size: {batch_size}')
 
         start = time.time()
         ray.init(address='auto', _redis_password='5241590000000000')
@@ -175,7 +185,7 @@ class FindFactorExperiment:
 
         precomputing_worker_ids = []
         wid = 0
-        for x in eh.dict_to_chunks(datachunk, 3):
+        for x in eh.dict_to_chunks(datachunk, 50):
             eid = precompute_explanations.remote(
                 x,
                 ['Positive', 'Negative'],
@@ -218,17 +228,18 @@ class FindFactorExperiment:
             pickle.dump(precomputed_data, f)
             self._logi(f'Precomputed data saved to {self.basepath}')
 
-        # with open('/home/tomasmizera/school/diploma/src/data/experiments/fp-precomputed-v3/2021-04-19_15:02/precomputed.pickle', 'rb') as f:
-        #     precomputed_data = pickle.load(f)
-
         self._logi(f'Started creating summaries {self.experimenttag}')
 
         datachunkid = ray.put(precomputed_data)
 
         working_ids = []
         fm_mapping = {}  # mapping fm: ray worker id
-        print('Starting generating remotes to compute summaries')
-        for factormultiplier in eh.generate_sequence(to_factor):
+
+        seq = [factor]
+        if run_to_factor:
+            seq = eh.generate_sequence(factor)
+
+        for factormultiplier in seq:
             task_id = initialize_task.remote(
                 datachunkid,  # id of tuple (list of instances ~ strings, list of labels ~ ints)
                 factormultiplier,
@@ -237,20 +248,17 @@ class FindFactorExperiment:
             )
             fm_mapping[task_id] = factormultiplier
             working_ids.append(task_id)
-            print(f'Created work for {factormultiplier} with ref {task_id}')
 
         try:
             del task_id
         except NameError:
             pass
 
-        print(f'Here, list: {working_ids} and map {fm_mapping}')
         # save done tasks (other workers might still be working)
         while working_ids:
             done_id, working_ids = ray.wait(working_ids)
             done_id = done_id[0]
             done_fm = fm_mapping[done_id]
-            print(f'Worker {done_fm} finished his job')
 
             outfilepath = os.path.join(self.outpath, f'fm-{done_fm}.csv')
             with open(outfilepath, 'w') as f:
@@ -260,7 +268,6 @@ class FindFactorExperiment:
             del fm_mapping[done_id], done_id
 
         del datachunkid
-        print('Everything is finished')
         end = time.time()
 
         self._logi(f'Experiment {self.experimenttag} took {end - start}')
