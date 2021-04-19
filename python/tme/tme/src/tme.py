@@ -14,15 +14,14 @@ class TextModelsExplainer:
     def __init__(
             self,
             modelfn=None,
-            classnames=[],
+            classnames=None,
             language="english",
             explainer=None,
             summarizer=None,
             fm=5,
             topfeaturescount=100,
             sentencescount=6,
-            logger=None,
-            uuid=""
+            logger=None
     ):
         self.fm = fm
         self.modelfn = modelfn
@@ -30,7 +29,6 @@ class TextModelsExplainer:
         self.topfeaturescount = topfeaturescount
         self.language = language
         self.sentencescount = sentencescount
-        self.uuid = uuid
 
         if explainer is not None:
             self.explainer = explainer

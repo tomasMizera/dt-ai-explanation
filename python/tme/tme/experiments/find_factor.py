@@ -1,18 +1,15 @@
-import sys
-
-import numpy as np
-
-import tme.experiments.experiment_helper as eh
-from tme.src import tme
-
 from filelock import FileLock
 from lime import lime_text
 from io import StringIO
+import numpy as np
 import logging
-import pickle
 import time
 import ray
+import sys
 import os
+
+import tme.experiments.experiment_helper as eh
+from tme.src import tme
 
 
 @ray.remote
@@ -23,7 +20,7 @@ def initialize_task(data, factor_multiplier, modelpath, workerid):
 
     print(f'Worker id #{workerid} started operating')
 
-    tmexplainer = tme.TextModelsExplainer(uuid=workerid)
+    tmexplainer = tme.TextModelsExplainer()
 
     print(f'Worker id #{workerid} processing fm: {factor_multiplier}')
 
@@ -38,7 +35,6 @@ def initialize_task(data, factor_multiplier, modelpath, workerid):
     csummary_texts = list(map(lambda x: x[0], csummary))
     ssummary_texts = list(ssummary)
 
-    model = ''
     with FileLock(os.path.join(os.path.expanduser(modelpath), "iolock.lock")):
         model = eh.load_lstm_model(os.path.expanduser(modelpath))
 
@@ -147,7 +143,6 @@ class FindFactorExperiment:
         data = eh.load_imdb_dataset('train+test')
         data = eh.preprocess_dataset(data, minnumofsentences)
         datagen = eh.generate_batches_of_size(data, batchsize)
-        datachunk = ''
 
         try:
             datachunk = next(datagen)
@@ -178,10 +173,9 @@ class FindFactorExperiment:
 
         self._logi(f'Started precomputing explanations {self.experimenttag}')
 
-        # precompute explanations
         precomputing_worker_ids = []
         wid = 0
-        for x in eh.dict_to_chunks(datachunk, 5):
+        for x in eh.dict_to_chunks(datachunk, 3):
             eid = precompute_explanations.remote(
                 x,
                 ['Positive', 'Negative'],
@@ -191,11 +185,17 @@ class FindFactorExperiment:
             precomputing_worker_ids.append(eid)
             wid += 1
 
+        try:
+            del eid
+        except NameError:
+            pass
+
         progress = 0.25
         precomputed_data = ([], [], [])  # text, label, explanation
         while precomputing_worker_ids:
             done_ids, precomputing_worker_ids = ray.wait(precomputing_worker_ids)
             res = ray.get(done_ids[0])
+            del done_ids
 
             for instanceid, explanation in res.items():
                 print(f"Saving precomputed id: {instanceid}")
@@ -218,12 +218,16 @@ class FindFactorExperiment:
             pickle.dump(precomputed_data, f)
             self._logi(f'Precomputed data saved to {self.basepath}')
 
+        # with open('/home/tomasmizera/school/diploma/src/data/experiments/fp-precomputed-v3/2021-04-19_15:02/precomputed.pickle', 'rb') as f:
+        #     precomputed_data = pickle.load(f)
+
         self._logi(f'Started creating summaries {self.experimenttag}')
 
         datachunkid = ray.put(precomputed_data)
 
         working_ids = []
         fm_mapping = {}  # mapping fm: ray worker id
+        print('Starting generating remotes to compute summaries')
         for factormultiplier in eh.generate_sequence(to_factor):
             task_id = initialize_task.remote(
                 datachunkid,  # id of tuple (list of instances ~ strings, list of labels ~ ints)
@@ -233,18 +237,30 @@ class FindFactorExperiment:
             )
             fm_mapping[task_id] = factormultiplier
             working_ids.append(task_id)
+            print(f'Created work for {factormultiplier} with ref {task_id}')
 
+        try:
+            del task_id
+        except NameError:
+            pass
+
+        print(f'Here, list: {working_ids} and map {fm_mapping}')
         # save done tasks (other workers might still be working)
         while working_ids:
-            done_ids, working_ids = ray.wait(working_ids)
-            result_id = done_ids[0]
+            done_id, working_ids = ray.wait(working_ids)
+            done_id = done_id[0]
+            done_fm = fm_mapping[done_id]
+            print(f'Worker {done_fm} finished his job')
 
-            outfilepath = os.path.join(self.outpath, f'fm-{fm_mapping[result_id]}.csv')
-
+            outfilepath = os.path.join(self.outpath, f'fm-{done_fm}.csv')
             with open(outfilepath, 'w') as f:
-                f.write(ray.get(result_id))
-                self._logi(f'Saved data for fm {fm_mapping[result_id]} to {outfilepath}')
+                f.write(ray.get(done_id))
+                self._logd(f'Saved data for fm {done_fm} to {outfilepath}')
 
+            del fm_mapping[done_id], done_id
+
+        del datachunkid
+        print('Everything is finished')
         end = time.time()
 
         self._logi(f'Experiment {self.experimenttag} took {end - start}')
