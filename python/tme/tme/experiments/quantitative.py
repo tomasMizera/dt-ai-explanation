@@ -1,3 +1,4 @@
+import psutil
 from filelock import FileLock
 from lime import lime_text
 from io import StringIO
@@ -8,6 +9,7 @@ import time
 import ray
 import sys
 import os
+import gc
 
 import tme.experiments.experiment_helper as eh
 from tme.src import tme
@@ -70,9 +72,10 @@ def initialize_task(data, factor_multiplier, modelpath, workerid):
 
 
 @ray.remote
-def precompute_explanations(data, cnames, modelpath, workerid):
+def precompute_explanations(data, cnames, modelpath, outpath, workerid):
     """
     data must be map of id:(string, int)
+    data ~ list of tuples (instance, label)
     """
 
     explanator = lime_text.LimeTextExplainer(class_names=cnames)
@@ -91,14 +94,17 @@ def precompute_explanations(data, cnames, modelpath, workerid):
         prediction = model.predict(_input)
         return np.append(prediction, 1 - prediction, axis=1)
 
-    outdict = {}
+    out = []
 
-    for uid, text in data.items():
-        explanation = explanator.explain_instance(text[0], _predict_proba_fn, num_features=100)
-        outdict[uid] = explanation.as_list()
+    for text, label in data:
+        explanation = explanator.explain_instance(text, _predict_proba_fn, num_features=100)
+        out.append((text, explanation, label))
 
-    print(f"Worker @{workerid} precomputed {len(data.keys())} instances")
-    return outdict
+    with open(os.path.join(outpath, f'{workerid}.pickle'), 'wb') as fout:
+        pickle.dump(out, fout)
+
+    print(f"Worker @{workerid} precomputed {len(data)} instances")
+    return workerid
 
 
 class QuantitativeExperiment:
@@ -113,6 +119,7 @@ class QuantitativeExperiment:
         self.basepath = os.path.join(self.experimentpath, now)
         self.logpath = os.path.join(self.basepath, 'log')
         self.outpath = os.path.join(self.basepath, 'csv')
+        self.datapath = os.path.join(self.basepath, 'precomputed')
 
         logfilepath = os.path.join(self.logpath, f'{self.experimenttag}-{now}.log')
 
@@ -121,6 +128,7 @@ class QuantitativeExperiment:
             os.makedirs(self.basepath, exist_ok=True)
             os.makedirs(self.logpath, exist_ok=True)
             os.makedirs(self.outpath, exist_ok=True)
+            os.makedirs(self.datapath, exist_ok=True)
 
             latestpath = os.path.join(self.experimentpath, 'latest')
             latestlogpath = os.path.join(self.logpath, 'latest.log')
@@ -145,96 +153,57 @@ class QuantitativeExperiment:
 
         self.log = logging.getLogger()
 
-    def prepare_data(self, batchsize, minnumofsentences):
-        data = eh.load_imdb_dataset('train+test')
-        data = eh.preprocess_dataset(data, minnumofsentences)
-        datagen = eh.generate_batches_of_size(data, batchsize)
+    def run_precompute(self, instances_count=10, min_sentences_count=30, worker_load=25):
+        self._logi(f'Started precomputing for {instances_count} instances with minimum {min_sentences_count} sentences')
 
-        try:
-            datachunk = next(datagen)
-        except StopIteration as e:  # Ran out of data, should not happen
-            self._logw(e)
-            return 1
+        dataset = eh.load_imdb_dataset('train+test')
+        datagen = eh.prepare_dataset_v2(
+            dataset,
+            min_sentences_count=min_sentences_count,
+            batch_size=worker_load,
+            expected_size=instances_count
+        )
+        del dataset
 
-        # convert tuple(list(x),list(y)) to dict(id: tuple(x, y))
-        data_x, data_y = datachunk
-        datadict = {}
-        instanceid = 0
-        for i, x in enumerate(data_x):
-            datadict[instanceid] = (x, data_y[i])
-            instanceid += 1
-
-        self._logi(f'Data prepared for experiment {self.experimenttag}')
-        return datadict
-
-    def run(self, batch_size=100, factor=100, from_sentences_count=10, run_to_factor=False):
-        self._logw(f'Starting experiment - {self.experimenttag} ------------------------')
-        self._logi(f'Experiment setup:\n- {"QUANTITATIVE" if not run_to_factor else "FINDING MAX"}\n'
-                   f'- factor / to factor: {factor}\n'
-                   f'- min sentences count: {from_sentences_count}\n'
-                   f'- batch size: {batch_size}')
-
-        start = time.time()
-        ray.init(address='auto', _redis_password='5241590000000000')
-
-        datachunk = self.prepare_data(batch_size, from_sentences_count)
-        if datachunk == 1:
-            return 1
-
-        self._logi(f'Started precomputing explanations {self.experimenttag}')
-
+        i = 0
         precomputing_worker_ids = []
-        wid = 0
-        for x in eh.dict_to_chunks(datachunk, 50):
-            eid = precompute_explanations.remote(
-                x,
+
+        while i * worker_load < instances_count:
+
+            try:
+                chunk = next(datagen)
+            except StopIteration as e:  # No more data
+                self._logw(f'Stopping, no more data, finished at iteration #{i}')
+                break
+
+            # spawn worker for chunk
+            precomputing_worker_ids.append(precompute_explanations.remote(
+                chunk,
                 ['Positive', 'Negative'],
                 self.modelpath,
-                wid
-            )
-            precomputing_worker_ids.append(eid)
-            wid += 1
+                self.datapath,
+                i
+            ))
+            self._logd(f'Scheduled worker @{i}')
 
-        try:
-            del eid
-        except NameError:
-            pass
+            i += 1
 
-        progress = 1
-        precomputed_data = ([], [], [])  # text, label, explanation
+        # wait for the rest of the workers
         while precomputing_worker_ids:
-            done_ids, precomputing_worker_ids = ray.wait(precomputing_worker_ids)
-            res = ray.get(done_ids[0])
-            del done_ids
+            uid, precomputing_worker_ids = ray.wait(precomputing_worker_ids)
+            self._logd(f'Worker @{ray.get(uid)} finished')
+            del uid
 
-            for instanceid, explanation in res.items():
-                precomputed_data[0].append(datachunk[instanceid][0])  # instance text
-                precomputed_data[1].append(datachunk[instanceid][1])  # instance label
-                precomputed_data[2].append(explanation)  # instance explanation
-                del datachunk[instanceid]
+            if psutil.virtual_memory().percent > 80:
+                col = gc.collect()
+                self._logd('GC collected ' + str(col))
 
-            if (len(precomputed_data[0]) / batch_size) > 0.1:
-                self._logi(f'Saving chunk #{progress} of data')
+        self._logi(f'Finished precomputing')
 
-                with open(os.path.join(self.basepath, f"precomputed_{progress}.pickle"), "wb") as f:
-                    pickle.dump(precomputed_data, f)
-                
-                precomputed_data = ([], [], [])
-                progress += 1
-
-        # assert len(datachunk) == len(precomputed_data[0])  # not true anymore
-        assert len(precomputed_data[0]) == len(precomputed_data[1]) == len(precomputed_data[2])
-        del datachunk
-
-        self._logi(f'Precomputed explanations for {self.experimenttag}, took: {time.time() - start}')
-
-        # save precomputated data
-        with open(os.path.join(self.basepath, f"precomputed_{progress}.pickle"), 'wb') as f:
-            pickle.dump(precomputed_data, f)
-            self._logi(f'Precomputed data saved to {self.basepath}')
-
+    def run_summaries(self, factor, run_to_factor):
         self._logi(f'Started creating summaries {self.experimenttag}')
 
+        precomputed_data = eh.read_precomputed_g('')
         datachunkid = ray.put(precomputed_data)
 
         working_ids = []
@@ -273,6 +242,31 @@ class QuantitativeExperiment:
             del fm_mapping[done_id], done_id
 
         del datachunkid
+
+    def run(self,
+            instances=100,
+            factor=100,
+            from_sentences_count=10,
+            run_to_factor=False,
+            only_precompute=True,
+            batch_size=25):
+        self._logw(f'Starting experiment - {self.experimenttag} ------------------------')
+        tagline = "PRECOMPUTE" if only_precompute else "QUANTITATIVE" if not run_to_factor else "FINDING MAX"
+        self._logi(f'Experiment setup:\n- {tagline}\n'
+                   f'- factor / to factor: {factor}\n'
+                   f'- min sentences count: {from_sentences_count}\n'
+                   f'- # of instances: {instances}')
+
+        start = time.time()
+        ray.init(address='auto', _redis_password='5241590000000000')
+
+        self.run_precompute(instances, from_sentences_count, batch_size)
+
+        self._logi(f'Precomputed explanations for {self.experimenttag}, took: {time.time() - start}')
+
+        if not only_precompute:
+            self.run_summaries(factor, run_to_factor)
+
         end = time.time()
 
         self._logi(f'Experiment {self.experimenttag} took {end - start}')

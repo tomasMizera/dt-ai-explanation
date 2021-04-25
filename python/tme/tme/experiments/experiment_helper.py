@@ -1,6 +1,7 @@
 import keras
 import tensorflow as tf
 import tensorflow_datasets as tfds
+from nltk import sent_tokenize
 
 
 def load_lstm_model(path):
@@ -25,6 +26,43 @@ def preprocess_dataset(dataset, max_sentences_count):
     dataset = dataset.map(lambda x, y, z: (x, z))
 
     return dataset
+
+
+def prepare_dataset_v2(dataset, min_sentences_count, batch_size, expected_size=-1):
+    """
+    Filters out instances with sentences count lower than min_sentences_count using nltk sent_tokenizer.
+    Returns generator
+    """
+
+    data = []
+    yielded_size = 0
+
+    for text, label in dataset.as_numpy_iterator():
+        x = text.decode('utf-8')
+        if len(sent_tokenize(x)) < min_sentences_count:
+            continue
+
+        data.append((x, label))
+        yielded_size += 1
+
+        if expected_size != -1 and yielded_size >= expected_size:
+            break  # reached the number of requested instances
+
+        if len(data) >= batch_size:
+            yield data
+            data.clear()
+
+    if len(data) > 0:
+        yield data
+
+    return
+
+
+def read_precomputed_g(path):
+    """
+    Reads pickles from path and yields them after each one
+    """
+    return
 
 
 def generate_batches(dataset, num_batches):
