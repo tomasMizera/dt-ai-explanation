@@ -1,7 +1,10 @@
+import os
+import pickle
 import keras
 import tensorflow as tf
 import tensorflow_datasets as tfds
 from nltk import sent_tokenize
+from filelock import FileLock
 
 
 def load_lstm_model(path):
@@ -58,10 +61,24 @@ def prepare_dataset_v2(dataset, min_sentences_count, batch_size, expected_size=-
     return
 
 
-def read_precomputed_g(path):
+def read_precomputed_g(path, batch_size):
     """
     Reads pickles from path and yields them after each one
     """
+    dirit = os.scandir(path)
+    data = []
+
+    for file in dirit:
+        if file.is_file() and file.name.endswith('.pickle'):
+            with FileLock(file.path + '.lock'):
+                with open(file.path, 'rb') as f:
+                    data.extend(pickle.load(f))
+            if len(data) >= batch_size:
+                yield data
+                data.clear()
+
+    if len(data) > 0:
+        yield data  # yield the rest that left
     return
 
 

@@ -1,0 +1,16 @@
+---
+precomputing:
+  precompute: No
+  instances: 10
+  min_sentences_count: 34
+  worker_load: 25
+
+summarizing:
+  precompute: Yes
+  precomputed_dir: "/home/tomasmizera/school/diploma/src/data/experiments/fm-1000-595-25-v1/2021-04-25_21:12/precomputed"
+#  precomputed_dir: "/home/tomasmizera/school/diploma/src/data/experiments/yamltest/2021-04-26_00:51/precomputed"
+  factor: 5
+  run_to_factor: Yes
+
+workers: 7
+

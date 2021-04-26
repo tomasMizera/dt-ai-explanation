@@ -16,59 +16,59 @@ from tme.src import tme
 
 
 @ray.remote
-def initialize_task(data, factor_multiplier, modelpath, workerid):
+def initialize_task(factor_multiplier, precomputed_path, modelpath, outpath, workerid):
     """
     Task for each worker with given fm, calculates and logs output
     """
 
-    print(f'Worker id #{workerid} started operating')
+    print(f'Worker id #{workerid} started processing fm: {factor_multiplier}')
 
     tmexplainer = tme.TextModelsExplainer()
+    i = 0
 
-    print(f'Worker id #{workerid} processing fm: {factor_multiplier}')
+    datagen = eh.read_precomputed_g(precomputed_path, 100)
+    for chunk in datagen:
+        data_x, expls, data_y = zip(*chunk)  # list of tuples to tuple of lists
+        data_x = list(data_x)
+        data_y = list(data_y)
+        expls = list(expls)
 
-    data_x, data_y, expls = data
-    del data
+        # create summaries - both
+        csummary = tmexplainer.explanation_summaries(data_x, fm=factor_multiplier, precomputed_explanations=expls)
+        ssummary = tmexplainer.simple_summaries(data_x)
 
-    # create summaries - both
-    csummary = tmexplainer.explanation_summaries(data_x, fm=factor_multiplier, precomputed_explanations=expls)
-    ssummary = tmexplainer.simple_summaries(data_x)
-    print(f'Worker id #{workerid} finished creating summaries for fm: {factor_multiplier}')
+        csummary = list(map(lambda x: x[0], csummary))
+        ssummary = list(ssummary)
 
-    csummary_texts = list(map(lambda x: x[0], csummary))
-    ssummary_texts = list(ssummary)
+        with FileLock(os.path.join(os.path.expanduser(modelpath), "iolock.lock")):
+            model = eh.load_lstm_model(os.path.expanduser(modelpath))
 
-    with FileLock(os.path.join(os.path.expanduser(modelpath), "iolock.lock")):
-        model = eh.load_lstm_model(os.path.expanduser(modelpath))
+        csummary = model.predict(csummary)
+        ssummary = model.predict(ssummary)
+        modelp = model.predict(data_x)
 
-    mcsummaries = model.predict(csummary_texts)
-    mssummaries = model.predict(ssummary_texts)
-    modelp = model.predict(data_x)
+        assert (all([len(modelp) == len(ssummary),
+                     len(ssummary) == len(csummary)]))
 
-    assert (all([len(modelp) == len(ssummary),
-                 len(ssummary) == len(csummary),
-                 len(csummary_texts) == len(ssummary),
-                 len(mssummaries) == len(ssummary_texts)]))
+        # convert true labels
+        labels = np.array(list(map(lambda x: [x], data_y)))
 
-    # convert true labels
-    labels = np.array(list(map(lambda x: [x], data_y)))
+        modelp = np.append(modelp, csummary, axis=1)
+        modelp = np.append(modelp, ssummary, axis=1)
+        modelp = np.append(modelp, labels, axis=1)
 
-    modelp = np.append(modelp, mcsummaries, axis=1)
-    modelp = np.append(modelp, mssummaries, axis=1)
-    modelp = np.append(modelp, labels, axis=1)
+        out = os.path.join(outpath, f'fm-{factor_multiplier}-{i}.csv')
+        np.savetxt(
+            out,
+            modelp,
+            fmt='%1.5f',
+            header="originalP,customSP,simpleSP,trueClass",
+            comments='',
+            delimiter=','
+        )
+        i += 1
 
-    out = StringIO()
-    np.savetxt(
-        out,
-        modelp,
-        fmt='%1.5f',
-        header="originalP,customSP,simpleSP,trueClass",
-        comments='',
-        delimiter=','
-    )
     print(f'Worker id #{workerid} finished processing multiplier {factor_multiplier}')
-
-    return out.getvalue()
 
 
 @ray.remote
@@ -186,6 +186,17 @@ class QuantitativeExperiment:
             ))
             self._logd(f'Scheduled worker @{i}')
 
+            if i and i % 8 == 0:
+                self._logd(f'Waiting to sync at @{i}')
+                done, precomputing_worker_ids = ray.wait(
+                    precomputing_worker_ids,
+                    num_returns=len(precomputing_worker_ids)
+                )
+                del done
+                self._logd(f'Synced, restarting ray @{i}')
+                ray.shutdown()
+                ray.init(address='auto', _redis_password='5241590000000000')
+
             i += 1
 
         # wait for the rest of the workers
@@ -200,77 +211,79 @@ class QuantitativeExperiment:
 
         self._logi(f'Finished precomputing')
 
-    def run_summaries(self, factor, run_to_factor):
+    def run_summaries(self, factor, run_to_factor, precomputed_path, workers):
         self._logi(f'Started creating summaries {self.experimenttag}')
 
-        precomputed_data = eh.read_precomputed_g('')
-        datachunkid = ray.put(precomputed_data)
-
         working_ids = []
-        fm_mapping = {}  # mapping fm: ray worker id
+        it = 0
+        cores = workers
 
         seq = [factor]
         if run_to_factor:
             seq = eh.generate_sequence(factor)
 
-        for factormultiplier in []:  # !! replace with seq
-            task_id = initialize_task.remote(
-                datachunkid,  # id of tuple (list of instances ~ strings, list of labels ~ ints)
+        for factormultiplier in seq:
+            working_ids.append(initialize_task.remote(
                 factormultiplier,
+                precomputed_path,
                 self.modelpath,
+                self.outpath,
                 f'work@{factormultiplier}'
-            )
-            fm_mapping[task_id] = factormultiplier
-            working_ids.append(task_id)
+            ))
+            self._logd(f'Scheduled work for fm {factormultiplier}')
 
-        try:
-            del task_id
-        except NameError:
-            pass
+            if (it + 1) % cores == 0:
+                self._logd(f'Waiting to sync at @{it}')
+                done, working_ids = ray.wait(working_ids, num_returns=len(working_ids))
+                del done
+                self._logd(f'Synced, restarting ray @{it}')
+                ray.shutdown()
+                ray.init(address='auto', _redis_password='5241590000000000')
+
+            it += 1
 
         # save done tasks (other workers might still be working)
         while working_ids:
             done_id, working_ids = ray.wait(working_ids)
-            done_id = done_id[0]
-            done_fm = fm_mapping[done_id]
-
-            outfilepath = os.path.join(self.outpath, f'fm-{done_fm}.csv')
-            with open(outfilepath, 'w') as f:
-                f.write(ray.get(done_id))
-                self._logd(f'Saved data for fm {done_fm} to {outfilepath}')
-
-            del fm_mapping[done_id], done_id
-
-        del datachunkid
+            del done_id
+            self._logd(f'Worker finished with summaries')
 
     def run(self,
             instances=100,
             factor=100,
             from_sentences_count=10,
             run_to_factor=False,
-            only_precompute=True,
-            batch_size=25):
+            precompute=True,
+            worker_load=25,
+            path_to_precomputed='',
+            workers=8):
         self._logw(f'Starting experiment - {self.experimenttag} ------------------------')
-        tagline = "PRECOMPUTE" if only_precompute else "QUANTITATIVE" if not run_to_factor else "FINDING MAX"
-        self._logi(f'Experiment setup:\n- {tagline}\n'
-                   f'- factor / to factor: {factor}\n'
-                   f'- min sentences count: {from_sentences_count}\n'
-                   f'- # of instances: {instances}')
+
+        tagline = "PRECOMPUTE" if precompute else "QUANTITATIVE" if not run_to_factor else "FINDING MAX"
+        if precompute:
+            self._logi(f'Experiment setup:\n- {tagline}\n'
+                       f'- min sentences count: {from_sentences_count}\n'
+                       f'- # of instances: {instances}\n'
+                       f'- work load: {worker_load}')
+        else:
+            self._logi(f'Experiment setup:\n- {tagline}\n'
+                       f'- factor: {factor}\n'
+                       f'- path to precomputed: {path_to_precomputed}')
 
         start = time.time()
         ray.init(address='auto', _redis_password='5241590000000000')
 
-        self.run_precompute(instances, from_sentences_count, batch_size)
+        if precompute:
+            self.run_precompute(instances, from_sentences_count, worker_load)
+            self._logi(f'Precomputed explanations for {self.experimenttag}, took: {time.time() - start}')
 
-        self._logi(f'Precomputed explanations for {self.experimenttag}, took: {time.time() - start}')
-
-        if not only_precompute:
-            self.run_summaries(factor, run_to_factor)
+        if not precompute:
+            self.run_summaries(factor, run_to_factor, path_to_precomputed, workers)
+            self._logi(f'Data written to {self.outpath}')
 
         end = time.time()
 
         self._logi(f'Experiment {self.experimenttag} took {end - start}')
-        self._logi(f'Data written to {self.outpath}')
         self._logw(f'Experiment {self.experimenttag} finished -----------------------')
 
         return 0

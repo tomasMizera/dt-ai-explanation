@@ -72,7 +72,10 @@ class TextModelsExplainer:
 
             for i, instance in enumerate(instances):
                 if precomputed_explanations:
-                    summaries.append(self._summarize_doc_custom(instance, precomputed_explanations[i]))
+                    e = precomputed_explanations[i]
+                    if type(e) != list:
+                        e = e.as_list()
+                    summaries.append(self._summarize_doc_custom(instance, e))
                 else:
                     summaries.append(self._summarize_doc_custom(instance))
 
