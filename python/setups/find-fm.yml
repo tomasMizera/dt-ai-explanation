@@ -6,10 +6,10 @@ precomputing:
   worker_load: 50
 
 summarizing:
-  precompute: Yes
-  precomputed_dir: "/home/tomasmizera/school/diploma/src/data/experiments/fm-1000-595-25-v1/2021-04-25_21:12/precomputed"
-  factor: 10000
-  run_to_factor: Yes
+  precompute: No
+  precomputed_dir: "/home/tomasmizera/school/diploma/src/data/experiments/q-10000/2021-04-26_02:02/precomputed"
+  factor: 962
+  run_to_factor: No
 
 workers: 7
 

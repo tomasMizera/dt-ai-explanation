@@ -1,5 +1,8 @@
 import os
 import pickle
+import unicodedata
+from pathlib import Path
+
 import keras
 import tensorflow as tf
 import tensorflow_datasets as tfds
@@ -92,6 +95,20 @@ def generate_batches(dataset, num_batches):
         yield batch
 
 
+def load_pickle_object(path):
+    """
+    Returns loaded pickle object from file, None if loading failed
+    Thread safe function
+    """
+
+    obj = None
+    with FileLock(path + '.lock'):
+        with open(path, 'rb') as f:
+            obj = pickle.load(f)
+
+    return obj
+
+
 def generate_batches_of_size(dataset, size_of_batch):
     """
     Generator function yielding one batch of fixed size from dataset at time
@@ -148,3 +165,17 @@ def dict_to_chunks(d, outdlen=100):
     it = iter(d)
     for i in range(0, len(d), outdlen):
         yield {k: d[k] for k in islice(it, outdlen)}
+
+
+def load_files(path_to_files):
+    files_it = os.scandir(path_to_files)
+    files_contents = []
+
+    for file in files_it:
+        if file.is_file() and file.name.endswith('.txt'):
+            content = Path(file.path).read_text()
+            files_contents.append(content)
+
+    del content
+    files_contents = list(map(lambda x: unicodedata.normalize('NFKC', x), files_contents))
+    return files_contents

@@ -58,5 +58,13 @@ if __name__ == '__main__':
                 )
         elif args.experiment == 'limebench':
             experiments.lime_benchmark.run()
+        elif args.experiment == 'user-study' or args.experiment == 'u':
+            experiments.user_study.run(
+                config['datapath'],
+                config['modelpath'],
+                config['vectorizerpath'],
+                config['outpath'],
+                config['workers']
+            )
         else:
             print(f'Uknown test name {args.experiment}')

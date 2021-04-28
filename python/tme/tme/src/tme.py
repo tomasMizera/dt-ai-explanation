@@ -46,7 +46,7 @@ class TextModelsExplainer:
         else:
             self.log = logging.getLogger()
 
-    def explanation_summaries(self, instances, fm=None, precomputed_explanations=None):
+    def explanation_summaries(self, instances, fm=None, precomputed_explanations=None, summary_type='str'):
         """
         Creates explanation summaries for all elements in instances
         :param instances: list of instances (1 instace = 1 string) or map of instanceId:instace
@@ -63,7 +63,7 @@ class TextModelsExplainer:
             summaries = {}
 
             for instance in instances:
-                summaries[instance] = self._summarize_doc_custom(instances[instance])
+                summaries[instance] = self._summarize_doc_custom(instances[instance], summary_type=summary_type)
 
             return summaries
 
@@ -75,9 +75,9 @@ class TextModelsExplainer:
                     e = precomputed_explanations[i]
                     if type(e) != list:
                         e = e.as_list()
-                    summaries.append(self._summarize_doc_custom(instance, e))
+                    summaries.append(self._summarize_doc_custom(instance, e, summary_type=summary_type))
                 else:
-                    summaries.append(self._summarize_doc_custom(instance))
+                    summaries.append(self._summarize_doc_custom(instance, summary_type=summary_type))
 
             return summaries
         else:
@@ -115,7 +115,7 @@ class TextModelsExplainer:
         parser = PlaintextParser.from_string(instance, Tokenizer(self.language))
         return summary_to_string(self.summarizer(parser.document, self.sentencescount))
 
-    def _summarize_doc_custom(self, instance, explanation=None):
+    def _summarize_doc_custom(self, instance, explanation=None, summary_type='str'):
         """
         Creates summary with altered weights based on explanation
         :param instance: text of instance
@@ -140,7 +140,10 @@ class TextModelsExplainer:
         # noinspection PyProtectedMember
         resulting_summary = self.summarizer._get_best_sentences(parser.document.sentences, self.sentencescount, graph)
 
-        return summary_to_string(resulting_summary), explanation
+        if summary_type == 'raw':
+            return resulting_summary, explanation
+
+        return summary_to_string(resulting_summary, '\n'), explanation
 
     def _logw(self, msg):
         if self.log is not None:

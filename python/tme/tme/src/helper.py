@@ -2,7 +2,7 @@ import re
 from IPython.core.display import display, HTML
 
 
-def summary_to_string(summary):
+def summary_to_string(summary, delim=' '):
     """
     Converts summary from sumy type (list of Sentences) to one string
     """
@@ -14,7 +14,7 @@ def summary_to_string(summary):
     i = 1
 
     while i < len(summary):
-        summary_str += ' ' + str(summary[i])
+        summary_str += delim + str(summary[i])
         i += 1
 
     return summary_str
@@ -36,8 +36,8 @@ def highlight_summary(summary, class_names=None, summary_name=None, decision=Non
 
     colors = {0: '16,171,232', 1: '199,175,16'}
 
-    start_highlight_tag = lambda col, a: f'<mark style="background-color:rgba({colors[col]},{a});">'
-    end_highlight_tag = '</mark>'
+    start_highlight_tag = lambda col, a: f'<span style="background-color:rgba({colors[col]},{a});">'
+    end_highlight_tag = '</span>'
 
     raw_text = summary[0]
     important_words_weights = summary[1]
@@ -96,4 +96,5 @@ def highlight_summary(summary, class_names=None, summary_name=None, decision=Non
 
     # ims = list(filter(lambda x: abs(x[1] < minimal_word_weight), important_words_weights))
     # print(ims)
+    print(raw_text)
     return display(HTML(result))

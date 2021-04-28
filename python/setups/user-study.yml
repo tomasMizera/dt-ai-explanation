@@ -1,0 +1,6 @@
+---
+datapath: "/home/tomasmizera/school/diploma/src/data/lime-religion"
+modelpath: "/home/tomasmizera/school/diploma/src/data/user-study/svm-model.pickle"
+vectorizerpath: "/home/tomasmizera/school/diploma/src/data/user-study/svm-vectorizer.pickle"
+outpath: "/home/tomasmizera/school/diploma/src/data/user-study/precomputed"
+workers: 7
