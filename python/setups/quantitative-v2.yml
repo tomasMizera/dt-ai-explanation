@@ -1,0 +1,15 @@
+---
+precomputing:
+  precompute: No
+  instances: 10000
+  min_sentences_count: 15
+  worker_load: 50
+
+summarizing:
+  precompute: No
+  precomputed_dir: "/home/tomasmizera/school/diploma/src/data/user-study/precomputed"
+  factor: 962
+  run_to_factor: No
+  summary_length: [4,6,8,10,12,14]
+
+workers: 3

@@ -54,7 +54,8 @@ if __name__ == '__main__':
                     path_to_precomputed=config['summarizing']['precomputed_dir'],
                     factor=config['summarizing']['factor'],
                     run_to_factor=config['summarizing']['run_to_factor'],
-                    workers=config['workers']
+                    workers=config['workers'],
+                    summary_length=config['summarizing']['summary_length']  # num of sentences in summary
                 )
         elif args.experiment == 'limebench':
             experiments.lime_benchmark.run()

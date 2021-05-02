@@ -1,7 +1,6 @@
 import psutil
 from filelock import FileLock
 from lime import lime_text
-from io import StringIO
 import numpy as np
 import logging
 import pickle
@@ -16,19 +15,26 @@ from tme.src import tme
 
 
 @ray.remote
-def initialize_task(factor_multiplier, precomputed_path, modelpath, outpath, workerid):
+def initialize_task(factor_multiplier, precomputed_path, modelpath, outpath, workerid, sentences_count=6):
     """
     Task for each worker with given fm, calculates and logs output
     """
 
     print(f'Worker id #{workerid} started processing fm: {factor_multiplier}')
 
-    tmexplainer = tme.TextModelsExplainer()
+    tmexplainer = tme.TextModelsExplainer(sentencescount=sentences_count)
     i = 0
 
     datagen = eh.read_precomputed_g(precomputed_path, 100)
     for chunk in datagen:
-        data_x, expls, data_y = zip(*chunk)  # list of tuples to tuple of lists
+        tmp = list(zip(*chunk))  # list of tuples to tuple of lists
+        if len(tmp) == 3:
+            data_x, expls, data_y = tmp
+        elif len(tmp) == 4:
+            code, data_y, expls, data_x = tmp
+        else:
+            raise ValueError("Unable to unpack input data")
+
         data_x = list(data_x)
         data_y = list(data_y)
         expls = list(expls)
@@ -57,7 +63,7 @@ def initialize_task(factor_multiplier, precomputed_path, modelpath, outpath, wor
         modelp = np.append(modelp, ssummary, axis=1)
         modelp = np.append(modelp, labels, axis=1)
 
-        out = os.path.join(outpath, f'fm-{factor_multiplier}-{i}.csv')
+        out = os.path.join(outpath, f'fm-{factor_multiplier}-{i}-{sentences_count}.csv')
         np.savetxt(
             out,
             modelp,
@@ -211,7 +217,18 @@ class QuantitativeExperiment:
 
         self._logi(f'Finished precomputing')
 
-    def run_summaries(self, factor, run_to_factor, precomputed_path, workers):
+    def spawn_summary_worker(self, fpm, precomputed_path, sentences_count=6):
+        eid = initialize_task.remote(
+            fpm,
+            precomputed_path,
+            self.modelpath,
+            self.outpath,
+            f'work@{fpm}',
+            sentences_count=sentences_count
+        )
+        return eid
+
+    def run_summaries(self, factor, run_to_factor, precomputed_path, workers, sentences_count=6):
         self._logi(f'Started creating summaries {self.experimenttag}')
 
         working_ids = []
@@ -222,25 +239,29 @@ class QuantitativeExperiment:
         if run_to_factor:
             seq = eh.generate_sequence(factor)
 
+        senlen = sentences_count
+        if type(sentences_count) != list:
+            senlen = [senlen]
+
         for factormultiplier in seq:
-            working_ids.append(initialize_task.remote(
-                factormultiplier,
-                precomputed_path,
-                self.modelpath,
-                self.outpath,
-                f'work@{factormultiplier}'
-            ))
-            self._logd(f'Scheduled work for fm {factormultiplier}')
+            for sentences_l in senlen:
+                working_ids.append(self.spawn_summary_worker(
+                    factormultiplier,
+                    precomputed_path,
+                    sentences_count=sentences_l
+                ))
 
-            if (it + 1) % cores == 0:
-                self._logd(f'Waiting to sync at @{it}')
-                done, working_ids = ray.wait(working_ids, num_returns=len(working_ids))
-                del done
-                self._logd(f'Synced, restarting ray @{it}')
-                ray.shutdown()
-                ray.init(address='auto', _redis_password='5241590000000000')
+                if (it + 1) % cores == 0:
+                    self._logd(f'Waiting to sync at @{it}')
+                    done, working_ids = ray.wait(working_ids, num_returns=len(working_ids))
+                    del done
+                    self._logd(f'Synced, restarting ray @{it}')
+                    ray.shutdown()
+                    ray.init(address='auto', _redis_password='5241590000000000')
 
-            it += 1
+                it += 1
+
+                self._logd(f'Scheduled work for fm {factormultiplier} and length {sentences_l}')
 
         # save done tasks (other workers might still be working)
         while working_ids:
@@ -256,7 +277,8 @@ class QuantitativeExperiment:
             precompute=True,
             worker_load=25,
             path_to_precomputed='',
-            workers=8):
+            workers=8,
+            summary_length=6):
         self._logw(f'Starting experiment - {self.experimenttag} ------------------------')
 
         tagline = "PRECOMPUTE" if precompute else "QUANTITATIVE" if not run_to_factor else "FINDING MAX"
@@ -278,7 +300,7 @@ class QuantitativeExperiment:
             self._logi(f'Precomputed explanations for {self.experimenttag}, took: {time.time() - start}')
 
         if not precompute:
-            self.run_summaries(factor, run_to_factor, path_to_precomputed, workers)
+            self.run_summaries(factor, run_to_factor, path_to_precomputed, workers, sentences_count=summary_length)
             self._logi(f'Data written to {self.outpath}')
 
         end = time.time()
