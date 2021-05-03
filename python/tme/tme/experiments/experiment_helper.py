@@ -34,7 +34,7 @@ def preprocess_dataset(dataset, max_sentences_count):
     return dataset
 
 
-def prepare_dataset_v2(dataset, min_sentences_count, batch_size, expected_size=-1):
+def prepare_dataset_v2(dataset, min_sentences_count, batch_size, expected_size="all"):
     """
     Filters out instances with sentences count lower than min_sentences_count using nltk sent_tokenizer.
     Returns generator
@@ -51,7 +51,7 @@ def prepare_dataset_v2(dataset, min_sentences_count, batch_size, expected_size=-
         data.append((x, label))
         yielded_size += 1
 
-        if expected_size != -1 and yielded_size >= expected_size:
+        if expected_size != "all" and yielded_size >= expected_size:
             break  # reached the number of requested instances
 
         if len(data) >= batch_size:
@@ -107,6 +107,14 @@ def load_pickle_object(path):
             obj = pickle.load(f)
 
     return obj
+
+
+def load_religion_model(path):
+    """
+    Loads SVM model and vectorizer that must be in the same path
+    """
+    return (load_pickle_object(os.path.join(path, "svm-model.pickle")),
+            load_pickle_object(os.path.join(path, "svm-vectorizer.pickle")))
 
 
 def generate_batches_of_size(dataset, size_of_batch):
@@ -179,3 +187,43 @@ def load_files(path_to_files):
     del content
     files_contents = list(map(lambda x: unicodedata.normalize('NFKC', x), files_contents))
     return files_contents
+
+
+def load_religion_dataset(path_to_files, batch_size=25):
+    """
+    Returns generator
+    """
+    chrs = os.scandir(os.path.join(path_to_files, "christianity"))
+    ath = os.scandir(os.path.join(path_to_files, "atheism"))
+    chunk = []
+
+    for file in chrs:
+        if file.is_file() and file.name.endswith('.txt'):
+
+            chunk.append(
+                (
+                    unicodedata.normalize('NFKC', (Path(file.path).read_text())),
+                    1
+                )
+            )
+            if len(chunk) >= batch_size:
+                yield chunk
+                chunk.clear()
+
+    for file in ath:
+        if file.is_file() and file.name.endswith('.txt'):
+
+            chunk.append(
+                (
+                    unicodedata.normalize('NFKC', (Path(file.path).read_text())),
+                    0
+                )
+            )
+            if len(chunk) >= batch_size:
+                yield chunk
+                chunk.clear()
+
+    if len(chunk) > 0:
+        yield chunk
+
+    return
