@@ -18,7 +18,7 @@ class TextModelsExplainer:
             language="english",
             explainer=None,
             summarizer=None,
-            fm=5,
+            fm=962,
             topfeaturescount=100,
             sentencescount=6,
             logger=None

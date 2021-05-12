@@ -1,25 +1,24 @@
 # Quantitative experiment with variable number of features in explanations on religion dataset
 
 ---
-mode: 'precomputing'
+mode: 'summarizing'
 
 dataset: "religion"  # can be imdb too
-model: "svm-lime"
-model_path: "/home/tomasmizera/school/diploma/src/data/user-study"
+model: "svm-lime"  # can also be lstm
+model_path: "/home/tomasmizera/school/diploma/src/data/user-study/model"
 classes: ["Atheism", "Christianity"]
 
 precomputing:
   data_path: "/home/tomasmizera/school/diploma/src/data/lime-religion/"
   instances: "all"
   min_sentences_count: 15
-  worker_load: 50
-  workers: 5
+  worker_load: 100
+  workers: 6
   explanation_filter: [5, 10, 15, 20, 30, 50, 100, 1000]
 
 summarizing:
-  precomputed_dir: "/home/tomasmizera/school/diploma/src/data/user-study/precomputed"
+  precomputed_dir: "/home/tomasmizera/school/diploma/src/data/experiments/lime-tuning/2021-05-04_12:24/precomputed/expf:1000"
   factor: 962
   run_to_factor: No
   summary_length: [4, 6, 8, 10, 12]
-  workers: 4
-  explanation_filter: [5, 10, 15, 20, 30, 50, 100, 0.1, 0.05, 0.01, 0.005, 0.001, 0.0005, 0.0001]
+  workers: 5

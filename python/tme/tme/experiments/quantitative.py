@@ -10,6 +10,8 @@ import sys
 import os
 import gc
 
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
 import tme.experiments.experiment_helper as eh
 from tme.src import tme
 
@@ -22,17 +24,18 @@ def compute_log_summary(
         outpath,
         workerid,
         sentences_count=6,
+        modeltype="lstm",
         explanation_filter=None):
     """
     Task for each worker with given fm, calculates and logs output
     """
 
-    print(f'Worker id #{workerid} started processing fm: {factor_multiplier}, filter: {explanation_filter}')
+    print(f'Worker id #{workerid} started processing fm: {factor_multiplier}')
 
-    tmexplainer = tme.TextModelsExplainer()
+    tmexplainer = tme.TextModelsExplainer(sentencescount=sentences_count)
     i = 0
 
-    datagen = eh.read_precomputed_g(precomputed_path, 10)
+    datagen = eh.read_precomputed_g(precomputed_path, 100)
     for chunk in datagen:
         tmp = list(zip(*chunk))  # list of tuples to tuple of lists
         if len(tmp) == 3:
@@ -46,11 +49,11 @@ def compute_log_summary(
         data_y = list(data_y)
         expls = list(expls)
 
-        if explanation_filter is not None:
-            if type(explanation_filter) is int:  # filter by max number of explanation words
-                expls = [x.as_list()[:explanation_filter] for x in expls]
-            elif type(explanation_filter) is float:  # filter by minimum word weight
-                expls = [list(filter(lambda w: w[1] > explanation_filter, x.as_list())) for x in expls]
+        # if explanation_filter is not None:
+        #     if type(explanation_filter) is int:  # filter by max number of explanation words
+        #         expls = [x.as_list()[:explanation_filter] for x in expls]
+        #     elif type(explanation_filter) is float:  # filter by minimum word weight
+        #         expls = [list(filter(lambda w: w[1] > explanation_filter, x.as_list())) for x in expls]
 
         # create summaries - both
         csummary = tmexplainer.explanation_summaries(data_x, fm=factor_multiplier, precomputed_explanations=expls)
@@ -59,12 +62,22 @@ def compute_log_summary(
         csummary = list(map(lambda x: x[0], csummary))
         ssummary = list(ssummary)
 
-        with FileLock(os.path.join(os.path.expanduser(modelpath), "iolock.lock")):
-            model = eh.load_lstm_model(os.path.expanduser(modelpath))
+        if modeltype == "lstm":
+            with FileLock(os.path.join(os.path.expanduser(modelpath), "iolock.lock")):
+                model = eh.load_lstm_model(os.path.expanduser(modelpath))
 
-        csummary = model.predict(csummary)
-        ssummary = model.predict(ssummary)
-        modelp = model.predict(data_x)
+            modelp = model.predict(data_x)
+            csummary = model.predict(csummary)
+            ssummary = model.predict(ssummary)
+
+        elif modeltype == "svm-lime":
+            model, vectorizer = eh.load_religion_model(modelpath)
+            modelp = model.predict_proba(vectorizer.transform(data_x))
+            csummary = model.predict_proba(vectorizer.transform(csummary))
+            ssummary = model.predict_proba(vectorizer.transform(ssummary))
+
+        else:
+            raise ValueError("Unknown model! " + modeltype)
 
         assert (all([len(modelp) == len(ssummary),
                      len(ssummary) == len(csummary)]))
@@ -76,31 +89,41 @@ def compute_log_summary(
         modelp = np.append(modelp, ssummary, axis=1)
         modelp = np.append(modelp, labels, axis=1)
 
-        out = os.path.join(outpath, f'fm-{factor_multiplier}-{i}-{sentences_count}.csv')
+        out = os.path.join(outpath, f'fm:{factor_multiplier}-sen:{sentences_count}-part:{i}.csv')
 
         # explanation filter to filename
-        if explanation_filter is not None:
-            extag = explanation_filter
-            if type(explanation_filter) is float:
-                decimalplaces = 10 ** len(str(explanation_filter).split('.')[1])
-                extag = str(int(explanation_filter * decimalplaces)) + f'eminus{decimalplaces}'
-            out = os.path.join(outpath, f'fm-{factor_multiplier}-{i}-{sentences_count}-ef{extag}.csv')
+        # if explanation_filter is not None:
+        #     extag = explanation_filter
+        #     if type(explanation_filter) is float:
+        #         decimalplaces = 10 ** len(str(explanation_filter).split('.')[1])
+        #         extag = str(int(explanation_filter * decimalplaces)) + f'eminus{decimalplaces}'
+        #     out = os.path.join(outpath, f'fm-{factor_multiplier}-{i}-{sentences_count}-ef{extag}.csv')
 
-        np.savetxt(
-            out,
-            modelp,
-            fmt='%1.5f',
-            header="originalP,customSP,simpleSP,trueClass",
-            comments='',
-            delimiter=','
-        )
+        if modeltype == "lstm":
+            np.savetxt(
+                out,
+                modelp,
+                fmt='%1.5f',
+                header="originalP,customSP,simpleSP,trueClass",
+                comments='',
+                delimiter=','
+            )
+        elif modeltype == "svm-lime":
+            np.savetxt(
+                out,
+                modelp,
+                fmt='%1.5f',
+                header="original-0,original-1,custom-0,custom-1,simple-0,simple-1,trueClass",
+                comments='',
+                delimiter=','
+            )
         i += 1
 
     print(f'Worker id #{workerid} finished processing multiplier {factor_multiplier}')
 
 
 @ray.remote
-def precompute_explanations(*, data, cnames, modeltype, modelpath, exp_filter, outpath, workerid):
+def precompute_explanations(*, data, cnames, modeltype, modelpath, exp_filter, outpath, workerid, partid):
     """
     data must be map of id:(string, int)
     data ~ list of tuples (instance, label)
@@ -108,7 +131,9 @@ def precompute_explanations(*, data, cnames, modeltype, modelpath, exp_filter, o
 
     explanator = lime_text.LimeTextExplainer(class_names=cnames)
 
-    if modeltype == "lstm-imdb":
+    print(f"Worker @{workerid} started precomputing {len(data)} instances, ef {exp_filter} part {partid}")
+
+    if modeltype == "lstm":
         with FileLock(os.path.join(modelpath, "iolock.lock")):
             model = eh.load_lstm_model(os.path.expanduser(modelpath))
     elif modeltype == "svm-lime":
@@ -140,7 +165,7 @@ def precompute_explanations(*, data, cnames, modeltype, modelpath, exp_filter, o
     if not os.path.exists(outdir):
         os.makedirs(outdir, exist_ok=True)
 
-    with open(os.path.join(outdir, f'filter:{exp_filter}-part:{workerid}.pickle'), 'wb') as fout:
+    with open(os.path.join(outdir, f'filter:{exp_filter}-part:{partid}.pickle'), 'wb') as fout:
         pickle.dump(out, fout)
 
     print(f"Worker @{workerid} precomputed {len(data)} instances")
@@ -239,7 +264,6 @@ class QuantitativeExperiment:
                 self._logw(f'Stopping, no more data, finished at iteration #{i}')
                 break
 
-            parts_counter = 0
             for filter_i in explanation_filters:
                 # spawn worker for chunk
                 precomputing_worker_ids.append(precompute_explanations.remote(
@@ -249,20 +273,20 @@ class QuantitativeExperiment:
                     modelpath=self.modelpath,
                     exp_filter=filter_i,
                     outpath=self.datapath,
-                    workerid=parts_counter
+                    workerid=workers_cnt,
+                    partid=i
                 ))
-                self._logd(f'Scheduled worker @{workers_cnt}')
-                parts_counter += 1
+                self._logd(f'Scheduled worker @{workers_cnt}, for chunk {i} and ef {filter_i}')
                 workers_cnt += 1
 
                 if workers_cnt % workers == 0:
-                    self._logd(f'Waiting to sync at @{i}')
+                    self._logd(f'Waiting to sync at @{workers_cnt} part {i}')
                     done, precomputing_worker_ids = ray.wait(
                         precomputing_worker_ids,
                         num_returns=len(precomputing_worker_ids)
                     )
                     del done
-                    self._logd(f'Synced, restarting ray @{i}')
+                    self._logd(f'Synced, restarting ray after stop at @{workers_cnt}')
                     ray.shutdown()
                     ray.init(address='auto', _redis_password='5241590000000000')
             i += 1
@@ -279,58 +303,66 @@ class QuantitativeExperiment:
 
         self._logi(f'Finished precomputing')
 
-    def spawn_summary_worker(self, fpm, precomputed_path, sentences_count=6, explanation_size=None):
+    def spawn_summary_worker(self, fpm, precomputed_path, sentences_count=6, modeltype="svm-lime", explanation_size=None):
         eid = compute_log_summary.remote(
             fpm,
             precomputed_path,
             self.modelpath,
             self.outpath,
             f'work@{fpm}',
+            modeltype=modeltype,
             sentences_count=sentences_count,
-            explanation_filter=explanation_size
+            explanation_filter=explanation_size,
         )
         return eid
 
-    def run_summaries(self, **config):
+    def run_summaries(self, *,
+                      cores,
+                      factor,
+                      run_to_factor,
+                      summary_length,
+                      # explanation_filter,
+                      precomputed_dir,
+                      modeltype
+                      ):
         self._logi(f'Started creating summaries {self.experimenttag}')
 
         working_ids = []
         it = 0
-        cores = config["workers"]
 
-        seq = [config["factor"]]
-        if config["run_to_factor"]:
-            seq = eh.generate_sequence(config["factor"])
+        seq = [factor]
+        if run_to_factor:
+            seq = eh.generate_sequence(factor)
 
-        senlen = config["summary_length"]
-        if type(config["summary_length"]) != list:
+        senlen = summary_length
+        if type(senlen) != list:
             senlen = [senlen]
 
-        explsize = config["explanation_filter"]
-        if type(explsize) != list:
-            explsize = [explsize]
+        # explsize = explanation_filter
+        # if type(explsize) != list:
+        #     explsize = [explsize]
 
         for factormultiplier in seq:
             for sentences_l in senlen:
-                for explsize_l in explsize:
-                    working_ids.append(self.spawn_summary_worker(
-                        factormultiplier,
-                        config["precomputed_dir"],
-                        sentences_count=sentences_l,
-                        explanation_size=explsize_l
-                    ))
+                # for explsize_l in explsize:
+                working_ids.append(self.spawn_summary_worker(
+                    factormultiplier,
+                    precomputed_dir,
+                    sentences_count=sentences_l,
+                    modeltype=modeltype
+                ))
 
-                    if (it + 1) % cores == 0:
-                        self._logd(f'Waiting to sync at @{it}')
-                        done, working_ids = ray.wait(working_ids, num_returns=len(working_ids))
-                        del done
-                        self._logd(f'Synced, restarting ray @{it}')
-                        ray.shutdown()
-                        ray.init(address='auto', _redis_password='5241590000000000')
+                self._logd(f'Scheduled work for fm {factormultiplier}, length {sentences_l}')
 
-                    it += 1
+                if (it + 1) % cores == 0:
+                    self._logd(f'Waiting to sync at @{it}')
+                    done, working_ids = ray.wait(working_ids, num_returns=len(working_ids))
+                    del done
+                    self._logd(f'Synced, restarting ray @{it}')
+                    ray.shutdown()
+                    ray.init(address='auto', _redis_password='5241590000000000')
 
-                    self._logd(f'Scheduled work for fm {factormultiplier}, length {sentences_l} and explf {explsize_l}')
+                it += 1
 
         # save done tasks (other workers might still be working)
         while working_ids:
@@ -365,7 +397,14 @@ class QuantitativeExperiment:
             self._logi(f'Precomputed explanations for {self.experimenttag}, took: {time.time() - start}')
 
         if not precompute:
-            self.run_summaries(**config['summarizing'])
+            self.run_summaries(
+                summary_length=config["summarizing"]["summary_length"],
+                run_to_factor=config["summarizing"]["run_to_factor"],
+                cores=config["summarizing"]["workers"],
+                factor=config["summarizing"]["factor"],
+                precomputed_dir=config["summarizing"]["precomputed_dir"],
+                modeltype=config["model"]
+            )
             self._logi(f'Data written to {self.outpath}')
 
         end = time.time()
